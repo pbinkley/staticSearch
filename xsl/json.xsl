@@ -551,13 +551,24 @@
     </xd:doc>
     <xsl:function name="hcmc:getTotalTermsInDoc" as="xs:integer" new-each-time="no">
         <xsl:param name="docUri" as="xs:string"/>
-        <xsl:variable name="thisDoc" select="$tokenizedDocs[document-uri(.) = $docUri]" as="document-node()"/>
-        <xsl:variable name="thisDocSpans" select="$thisDoc//span[@data-staticSearch-stem]" as="element(span)*"/>
+        
+        <xsl:variable name="thisDoc" 
+            select="$tokenizedDocs[document-uri(.) = $docUri]" 
+            as="document-node()"/>
+        
+        <xsl:variable name="thisDocSpans" 
+            select="$thisDoc//span[@data-staticSearch-stem]" 
+            as="element(span)*"/>
         
         <!--We tokenize these since there can be multiple stems for a given span-->
-        <xsl:variable name="thisDocStems" select="for $span in $thisDocSpans return tokenize($span/@data-staticSearch-stem,'\s+')" as="xs:string+"/>
+        <xsl:variable name="thisDocStems" 
+            select="for $span in $thisDocSpans return tokenize($span/@data-staticSearch-stem,'\s+')" 
+            as="xs:string+"/>
         
-        <xsl:variable name="uniqueStems" select="distinct-values($thisDocStems)" as="xs:string+"/>
+        <xsl:variable name="uniqueStems"
+            select="distinct-values($thisDocStems)"
+            as="xs:string+"/>
+        
         <xsl:sequence select="count($uniqueStems)"/>
     </xsl:function>
     
@@ -571,137 +582,208 @@
        **************************************************************-->
     
     <xd:doc>
-        <xd:desc>createFiltersJson is a named template that creates files for each filter JSON; it will eventually supercede createDocsJson.
-        There are (currently) three types of filters that this process creates:
-        
+        <xd:desc>createFiltersJson is a named template that creates files for each filter JSON.
+        There are (currently) four types of filters that this process creates:
         <xd:ol>
-            <xd:li>Desc filters: These are organized as a desc (i.e. Genre) with an array of values (i.e. Poem) that contains an array of document ids that apply to that value (i.e. MyPoem1.html, MyPoem2.html)</xd:li>
-            <xd:li>Boolean Filters: These are organized as a desc value (i.e. Discusses Foreign Affairs) with an array of two values: True and False.</xd:li>
-            <xd:li>Date filters: These are a bit different than the above. Since dates can contain a range, these JSONs must be organized not by date but by document.</xd:li>
+            <xd:li>Desc filters: These are organized as a desc (i.e. Genre) with an array of values (i.e. Poem) 
+                that contains an array of document ids that apply to that value (i.e. MyPoem1.html, MyPoem2.html)</xd:li>
+            <xd:li>Numerical filters: </xd:li>
+            <xd:li>Boolean filters: These are organized as a desc value (i.e. Discusses Foreign Affairs) with an 
+                array of two values: True and False.</xd:li>
+            <xd:li>Date filters: These are a bit different than the above. Since dates can contain a range, these
+                JSONs must be organized not by date but by document.</xd:li>
         </xd:ol>
         </xd:desc>
     </xd:doc>
     <xsl:template name="createFiltersJson">
-        <!--We only want metas from documents which themselves aren't excluded
-            and from documents that aren't excluded-->
-        <xsl:for-each-group select="$tokenizedDocs//meta[matches(@class,'^|\s+staticSearch\.')][not(@data-staticSearch-exclude)][not(ancestor::html[@data-staticSearch-exclude])]" group-by="tokenize(@class,'\s+')[matches(.,'^staticSearch\.')]">
+        <!--Filter regex-->
+        <xsl:variable name="filterRex"
+            select="'(^|\s+)staticSearch\.(desc|num|bool|date)(\s+|$)'"
+            as="xs:string"/>
+        
+        <!--Get all of the metas (that aren't meant to be excluded) from the tokenized docs-->
+        <xsl:variable name="allMetas" 
+            select="$tokenizedDocs//meta[not(ancestor-or-self::*[@data-staticSearch-exclude])]"
+            as="element(meta)*"/>
+        
+        <!--Now just get the ssMetas-->
+        <xsl:variable name="ssMetas" 
+            select="$allMetas[matches(@class,$filterRex)]"
+            as="element(meta)*"/>
+        
+        <xsl:for-each-group select="$ssMetas" group-by="tokenize(@class,'\s+')[matches(.,$filterRex)]">
             
-            <xsl:variable name="thisClass" select="current-grouping-key()"/>
-            <xsl:variable name="metaNum" select="position()"/>
-            <xsl:for-each-group select="current-group()" group-by="@name">
-                <xsl:variable name="thisName" select="current-grouping-key()"/>
-                <xsl:variable name="thisId" select="current-group()[1]/@data-staticSearch-filter-id"/>
-                    <xsl:choose>
-                        <xsl:when test="$thisClass = 'staticSearch.desc'">
-                            <xsl:variable name="tmpMap" as="element(j:map)">
-                                <map xmlns="http://www.w3.org/2005/xpath-functions">
-                                    <string key="filterId"><xsl:value-of select="$thisId"/></string>
-                                    <string key="filterName"><xsl:value-of select="$thisName"/></string>
-                                    
-                                    <!--Now iterate through these values via their content-->
-                                    <xsl:for-each-group select="current-group()" group-by="@content">
-                                        
-                                        <xsl:variable name="thisContent" select="current-grouping-key()"/>
-                                        <xsl:variable name="subGroupPos" select="position()"/>
-                                        
-                                        
-                                        <xsl:variable name="filterId" select="$thisId || '_' || $subGroupPos"/>
-                                        <map key="{$filterId}">
-                                            <string key="name"><xsl:value-of select="$thisContent"/></string>
-                                            <string key="sortKey"><xsl:value-of select="if (current-group()[1]/@data-ssFilterSortKey) then current-group()[1]/@data-ssFilterSortKey else $thisContent"/></string>
-                                            <array key="docs">
-                                                <xsl:for-each-group select="current-group()" group-by="ancestor::html[not(@data-staticSearch-exclude)]/@data-staticSearch-relativeUri">
-                                                    
-                                                    <string><xsl:value-of select="current-grouping-key()"/></string>
-                                                </xsl:for-each-group>
-                                            </array>
-                                        </map>
-                                    </xsl:for-each-group>
-                                </map>
-                            </xsl:variable>
-                            <xsl:result-document href="{$outDir || '/filters/' || $thisId || $versionString || '.json'}" method="text">
-                                <xsl:value-of select="xml-to-json($tmpMap)"/>
-                            </xsl:result-document>
-                        </xsl:when>
-                        
-                        
-                        <xsl:when test="$thisClass='staticSearch.bool'">
-                            <xsl:variable name="tmpMap" as="element(j:map)">
-                                <map xmlns="http://www.w3.org/2005/xpath-functions">
-                                    <string key="filterId"><xsl:value-of select="$thisId"/></string>
-                                    <string key="filterName"><xsl:value-of select="@name"/></string>
-                                    <xsl:for-each-group select="current-group()" group-by="hcmc:normalize-boolean(@content)">
-                                         <!--We have to sort these descending so that we reliably get true followed by false. -->
-                                        <xsl:sort select="hcmc:normalize-boolean(@content)" order="descending"/>
-                                        <xsl:variable name="filterId" select="concat($thisId,'_',position())"/>
-                                        <map key="{$filterId}">
-                                            <string key="value"><xsl:value-of select="current-grouping-key()"/></string>
-                                            <array key="docs">
-                                                <xsl:for-each-group select="current-group()" group-by="ancestor::html/@data-staticSearch-relativeUri">
-                                                    <string><xsl:value-of select="current-grouping-key()"/></string>
-                                                </xsl:for-each-group>
-                                            </array>
-                                        </map>
-                                    </xsl:for-each-group>
-                                </map>
-                            </xsl:variable>
-                            <xsl:result-document href="{$outDir || '/filters/' || $thisId || $versionString || '.json'}" method="text">
-                                <xsl:value-of select="xml-to-json($tmpMap)"/>
-                            </xsl:result-document>
-                        </xsl:when>
-                        
-                        <xsl:when test="$thisClass='staticSearch.date'">
-                            <xsl:variable name="tmpMap" as="element(j:map)">
-                                <map xmlns="http://www.w3.org/2005/xpath-functions">
-                                    <string key="filterId"><xsl:value-of select="$thisId"/></string>
-                                    <string key="filterName"><xsl:value-of select="$thisName"/></string>
-                                    <map key="docs">
-                                        <xsl:for-each-group select="current-group()" group-by="ancestor::html/@data-staticSearch-relativeUri">
-                                            <xsl:variable name="filterId" select="concat($thisId,'_',position())"/>
-                                            <array key="{current-grouping-key()}">
-                                                <xsl:for-each select="current-group()">
-                                                    <xsl:for-each select="tokenize(@content,'/')">
-                                                        <string><xsl:value-of select="."/></string>
-                                                    </xsl:for-each>
-                                                </xsl:for-each>
-                                            </array>
-                                        </xsl:for-each-group>
-                                    </map>
-                                    
-                                </map>
-                            </xsl:variable>
-                            <xsl:result-document href="{$outDir || '/filters/' || $thisId || $versionString || '.json'}" method="text">
-                                <xsl:value-of select="xml-to-json($tmpMap)"/>
-                            </xsl:result-document>
-                        </xsl:when>
-                        <xsl:when test="$thisClass ='staticSearch.num'">
-                            <xsl:variable name="tmpMap" as="element(j:map)">
-                                <map xmlns="http://www.w3.org/2005/xpath-functions">
-                                    <string key="filterId"><xsl:value-of select="$thisId"/></string>
-                                    <string key="filterName"><xsl:value-of select="$thisName"/></string>
-                                    <map key="docs">
-                                        <xsl:for-each-group select="current-group()" group-by="ancestor::html/@data-staticSearch-relativeUri">
-                                            <xsl:variable name="filterId" select="concat($thisId,'_',position())"/>
-                                            <array key="{current-grouping-key()}">
-                                                <xsl:for-each-group select="current-group()[@content castable as xs:decimal]" group-by="xs:decimal(@content)">
-                                                    <string><xsl:value-of select="xs:decimal(current-grouping-key())"/></string>
-                                                </xsl:for-each-group>
-                                            </array>
-                                        </xsl:for-each-group>
-                                    </map>
-                                    
-                                </map>
-                            </xsl:variable>
-                            <xsl:result-document
-                                href="{$outDir || '/filters/' || $thisId || $versionString || '.json'}" method="text">
-                                <xsl:value-of select="xml-to-json($tmpMap)"/>
-                            </xsl:result-document>
-                        </xsl:when>
-                    </xsl:choose>
+            <!--Get the class for the filter (staticSearch.desc, staticSearch.num, etc)-->
+            <xsl:variable name="thisFilterClass" 
+                select="current-grouping-key()"
+                as="xs:string"/>
+            
+            <!--Stash the current metas in a group (since that's easier)-->
+            <xsl:variable name="currentMetas"
+                select="current-group()"
+                as="element(meta)*"/>
+            
+            <!--Get the base type for the filter (desc, num, etc)-->
+            <xsl:variable name="thisFilterType"
+                select="replace($thisFilterClass, $filterRex, '$2')"
+                as="xs:string"/>
+            
+            <!--Now create the filter type id (ssDesc, ssNum, etc)-->
+            <xsl:variable name="thisFilterTypeId"
+                select="'ss' || upper-case(substring($thisFilterType, 1,1)) || substring($thisFilterType, 2)"
+                as="xs:string"/>
+            
+            <xsl:for-each-group select="$currentMetas" group-by="normalize-space(@name)">
                 
+                <!--Get all of the current named filters-->
+                <xsl:variable name="thisFilterMetas" 
+                    select="current-group()"
+                    as="element(meta)*"/>
+                
+                <!--Get the current name for this filter-->
+                <xsl:variable name="thisFilterName" 
+                    select="current-grouping-key()"
+                    as="xs:string"/>
+                
+                <!--Get the filter position (which is arbitrary) since we do the sorting below -->
+                <xsl:variable name="thisFilterPos" 
+                    select="position()" 
+                    as="xs:integer"/>
+                
+                <!--Construct the filter id-->
+                <xsl:variable name="thisFilterId"
+                    select="$thisFilterTypeId || $thisFilterPos"
+                    as="xs:string"/>
+                
+                <!--Now start constructing the map for each meta by name-->
+                <xsl:variable name="tmpMap" as="element(j:map)">
+                    <map xmlns="http://www.w3.org/2005/xpath-functions">
+                        <string key="filterId"><xsl:value-of select="$thisFilterId"/></string>
+                        <string key="filterName"><xsl:value-of select="$thisFilterName"/></string>
+                        <!--Now fork on filter types-->
+                        <xsl:choose>
+                            <xsl:when test="$thisFilterType = 'desc'">
+                                <xsl:sequence select="hcmc:createDescFilterMap($thisFilterMetas, $thisFilterId)"/>
+                            </xsl:when>
+                            <xsl:when test="$thisFilterType = 'date'">
+                                <xsl:sequence select="hcmc:createDateFilterMap($thisFilterMetas, $thisFilterId)"/>
+                            </xsl:when>
+                            <xsl:when test="$thisFilterType = 'num'">
+                                <xsl:sequence select="hcmc:createNumFilterMap($thisFilterMetas, $thisFilterId)"/>
+                            </xsl:when>
+                            <xsl:when test="$thisFilterType = 'bool'">
+                                <xsl:sequence select="hcmc:createBoolFilterMap($thisFilterMetas, $thisFilterId)"/>
+                            </xsl:when>
+                            <xsl:otherwise>
+                                <xsl:message>WARNING: Unknown filter type: <xsl:value-of select="$thisFilterType"/></xsl:message>
+                            </xsl:otherwise>
+                        </xsl:choose>
+                    </map>
+                </xsl:variable>
+                
+                <xsl:result-document href="{$outDir || '/filters/' || $thisFilterId || $versionString || '.json'}" method="text">
+                    <xsl:value-of select="xml-to-json($tmpMap)"/>
+                </xsl:result-document>
+                        
             </xsl:for-each-group>
         </xsl:for-each-group>
     </xsl:template>
+    
+    <xsl:function name="hcmc:createDescFilterMap" as="element(j:map)+">
+        <xsl:param name="metas" as="element(meta)+"/>
+        <xsl:param name="filterIdPrefix" as="xs:string"/>
+        
+        <xsl:for-each-group select="$metas" group-by="@content">
+            <xsl:variable name="thisName"
+                select="current-grouping-key()"
+                as="xs:string"/>
+            <xsl:variable name="thisPosition"
+                select="position()"
+                as="xs:integer"/>
+            <xsl:variable name="filterId" 
+                select="$filterIdPrefix || '_' || $thisPosition" 
+                as="xs:string"/>
+            <xsl:variable name="declaredSortKey"
+                select="current-group()[@data-ssFilterSortKey][1]/@data-ssFilterSortKey"
+                as="xs:string?"/>
+            
+            <map key="{$filterId}" xmlns="http://www.w3.org/2005/xpath-functions">
+                <string key="name"><xsl:value-of select="$thisName"/></string>
+                <string key="sortKey">
+                    <xsl:value-of select="if (exists($declaredSortKey)) then $declaredSortKey else $thisName"/>
+                </string>
+                <array key="docs">
+                    <xsl:for-each-group select="current-group()" group-by="ancestor::html/@data-staticSearch-relativeUri">
+                        <string><xsl:value-of select="current-grouping-key()"/></string>
+                    </xsl:for-each-group>
+                </array>
+            </map>
+        </xsl:for-each-group>
+    </xsl:function>
+    
+    <xsl:function name="hcmc:createBoolFilterMap" as="element(j:map)+">
+        <xsl:param name="metas" as="element(meta)+"/>
+        <xsl:param name="filterIdPrefix" as="xs:string"/>
+        
+        <xsl:for-each-group select="$metas" group-by="hcmc:normalize-boolean(@content)">
+            
+            <!--We have to sort these descending so that we reliably get true followed by false. -->
+            <xsl:sort select="current-grouping-key()" order="descending"/>
+            
+            <xsl:variable name="thisValue"
+                select="current-grouping-key()"
+                as="xs:string"/>
+            <xsl:variable name="thisPosition"
+                select="position()"
+                as="xs:integer"/>
+            <xsl:variable name="filterId" 
+                select="$filterIdPrefix || '_' || $thisPosition" 
+                as="xs:string"/>
+            
+            <xsl:message>Processing <xsl:sequence select="$filterId"/></xsl:message>
+            
+            <map key="{$filterId}" xmlns="http://www.w3.org/2005/xpath-functions">
+                <string key="value"><xsl:value-of select="$thisValue"/></string>
+                <array key="docs">
+                    <xsl:for-each-group select="current-group()" group-by="ancestor::html/@data-staticSearch-relativeUri">
+                        <string><xsl:value-of select="current-grouping-key()"/></string>
+                    </xsl:for-each-group>
+                </array>
+            </map>
+        </xsl:for-each-group>
+    </xsl:function>
+    
+    <xsl:function name="hcmc:createDateFilterMap" as="element(j:map)">
+        <xsl:param name="metas" as="element(meta)+"/>
+        <xsl:param name="filterIdPrefix" as="xs:string"/>
+        <map key="docs" xmlns="http://www.w3.org/2005/xpath-functions">
+            <xsl:for-each-group select="$metas" group-by="ancestor::html/@data-staticSearch-relativeUri">
+                <array key="{current-grouping-key()}">
+                    <xsl:for-each select="current-group()">
+                        <xsl:for-each select="tokenize(@content,'/')">
+                            <string><xsl:value-of select="."/></string>
+                        </xsl:for-each>
+                    </xsl:for-each>
+                </array>
+            </xsl:for-each-group>
+        </map>
+    </xsl:function>
+    
+    
+    <xsl:function name="hcmc:createNumFilterMap" as="element(j:map)">
+        <xsl:param name="metas" as="element(meta)+"/>
+        <xsl:param name="filterIdPrefix" as="xs:string"/>
+        <map key="docs"  xmlns="http://www.w3.org/2005/xpath-functions">
+            <xsl:for-each-group select="$metas" group-by="ancestor::html/@data-staticSearch-relativeUri">
+                <array key="{current-grouping-key()}">
+                    <xsl:for-each-group select="current-group()[@content castable as xs:decimal]" group-by="xs:decimal(@content)">
+                        <string><xsl:value-of select="xs:decimal(current-grouping-key())"/></string>
+                    </xsl:for-each-group>
+                </array>
+            </xsl:for-each-group>
+        </map>
+    </xsl:function>
+    
     
     
     <!--**************************************************************

@@ -123,7 +123,8 @@
 
                 would silently overwrite the first. -->
             
-            <xsl:result-document href="{$outDir}/{if (matches($stem,'^[A-Z]')) then 'upper' else 'lower'}/{$stem}{$versionString}.json" method="text">
+            <xsl:result-document
+                href="{$outDir}/{if (matches($stem,'^[A-Z]')) then 'upper' else 'lower'}/{$stem}{$versionString}.json" method="text">
                 <xsl:value-of select="xml-to-json($map, map{'indent': $indentJSON})"/>
             </xsl:result-document>
         </xsl:for-each-group>
@@ -367,8 +368,6 @@
         </xsl:if>
         <xsl:sequence
             select="$tf * $idf"/>
-        
-   
     </xsl:function>
 
 
@@ -587,11 +586,13 @@
         <xd:ol>
             <xd:li>Desc filters: These are organized as a desc (i.e. Genre) with an array of values (i.e. Poem) 
                 that contains an array of document ids that apply to that value (i.e. MyPoem1.html, MyPoem2.html)</xd:li>
-            <xd:li>Numerical filters: </xd:li>
+
             <xd:li>Boolean filters: These are organized as a desc value (i.e. Discusses Foreign Affairs) with an 
                 array of two values: True and False.</xd:li>
             <xd:li>Date filters: These are a bit different than the above. Since dates can contain a range, these
                 JSONs must be organized not by date but by document.</xd:li>
+            <xd:li>Numerical filters: These are similar to dates where the JSON is organized by document, since
+            these can also contain a range.</xd:li>
         </xd:ol>
         </xd:desc>
     </xd:doc>
@@ -660,7 +661,8 @@
                     <map xmlns="http://www.w3.org/2005/xpath-functions">
                         <string key="filterId"><xsl:value-of select="$thisFilterId"/></string>
                         <string key="filterName"><xsl:value-of select="$thisFilterName"/></string>
-                        <!--Now fork on filter types-->
+                        
+                        <!--Now fork on filter types and call the respective functions-->
                         <xsl:choose>
                             <xsl:when test="$thisFilterType = 'desc'">
                                 <xsl:sequence select="hcmc:createDescFilterMap($thisFilterMetas, $thisFilterId)"/>
@@ -681,6 +683,7 @@
                     </map>
                 </xsl:variable>
                 
+                <!--Now output the JSON-->
                 <xsl:result-document href="{$outDir || '/filters/' || $thisFilterId || $versionString || '.json'}" method="text">
                     <xsl:value-of select="xml-to-json($tmpMap)"/>
                 </xsl:result-document>
@@ -689,6 +692,27 @@
         </xsl:for-each-group>
     </xsl:template>
     
+    
+    
+    <xd:doc>
+        <xd:desc><xd:ref name="hcmc:createDescFilterMap" type="function">hcmc:createDescFilterMap</xd:ref>
+        creates the content for each ssDesc filter map by associating each unique ssDesc value with the
+        set of documents to which it corresponds.</xd:desc>
+        <xd:param name="metas">All of the meta tags for a particular ssDesc filter (i.e. meta name="Document Type")</xd:param>
+        <xd:param name="filterIdPrefix">The id for that filter (ssDesc1)</xd:param>
+        <xd:return>A sequence of maps for each value:
+        ssDesc1_1: {
+            name: 'Poem',
+            sortKey: 'Poem',
+            docs: ['doc1', 'doc2', 'doc10']
+        },
+        ssDesc1_2: {
+            name: 'Novel',
+            sortKey: 'Novel',
+            docs: ['doc3', 'doc4']
+        }
+        </xd:return>
+    </xd:doc>
     <xsl:function name="hcmc:createDescFilterMap" as="element(j:map)+">
         <xsl:param name="metas" as="element(meta)+"/>
         <xsl:param name="filterIdPrefix" as="xs:string"/>
@@ -721,6 +745,23 @@
         </xsl:for-each-group>
     </xsl:function>
     
+    <xd:doc>
+        <xd:desc><xd:ref name="hcmc:createBoolFilterMap" type="function">hcmc:createBoolFilterMap</xd:ref>
+            creates the content for each ssBool filter map by associating each unique ssBool value with the
+            set of documents to which it corresponds.</xd:desc>
+        <xd:param name="metas">All of the meta tags for a particular ssBool filter (i.e. meta name="Discusses animals?")</xd:param>
+        <xd:param name="filterIdPrefix">The id for that filter (ssBool1)</xd:param>
+        <xd:return>A sequence of maps for each value:
+        ssBool1_1: {
+            value: 'true',
+            docs: ['doc1','doc2']
+        }
+        ssBool1_2: {
+            value: 'false',
+            docs: ['doc3']
+        }
+        </xd:return>
+    </xd:doc>
     <xsl:function name="hcmc:createBoolFilterMap" as="element(j:map)+">
         <xsl:param name="metas" as="element(meta)+"/>
         <xsl:param name="filterIdPrefix" as="xs:string"/>
@@ -740,8 +781,6 @@
                 select="$filterIdPrefix || '_' || $thisPosition" 
                 as="xs:string"/>
             
-            <xsl:message>Processing <xsl:sequence select="$filterId"/></xsl:message>
-            
             <map key="{$filterId}" xmlns="http://www.w3.org/2005/xpath-functions">
                 <string key="value"><xsl:value-of select="$thisValue"/></string>
                 <array key="docs">
@@ -753,6 +792,19 @@
         </xsl:for-each-group>
     </xsl:function>
     
+    <xd:doc>
+        <xd:desc><xd:ref name="hcmc:createDateFilterMap" type="function">hcmc:createDateFilterMap</xd:ref>
+            creates the content for each ssBool filter map by create a single map, which associates each document
+            with an array of values that it satisfies.</xd:desc>
+        <xd:param name="metas">All of the meta tags for a particular ssDate filter (i.e. meta name="Date of Publication")</xd:param>
+        <xd:param name="filterIdPrefix">The id for that filter (ssDate1)</xd:param>
+        <xd:return>A map organized by document:
+            {
+                doc1: ['1922'],
+                doc2: ['1923','1924'] //Represents a range
+            }
+        </xd:return>
+    </xd:doc>
     <xsl:function name="hcmc:createDateFilterMap" as="element(j:map)">
         <xsl:param name="metas" as="element(meta)+"/>
         <xsl:param name="filterIdPrefix" as="xs:string"/>
@@ -769,7 +821,19 @@
         </map>
     </xsl:function>
     
-    
+    <xd:doc>
+        <xd:desc><xd:ref name="hcmc:createNumFilterMap" type="function">hcmc:createNumFilterMap</xd:ref>
+            creates the content for each ssNum filter map by create a single map, which associates each document
+            with an array of values that it satisfies.</xd:desc>
+        <xd:param name="metas">All of the meta tags for a particular ssNum filter (i.e. meta name="Word count")</xd:param>
+        <xd:param name="filterIdPrefix">The id for that filter (ssNum1)</xd:param>
+        <xd:return>A map organized by document:
+            {
+            doc1: ['130'],
+            doc2: ['2490']
+            }
+        </xd:return>
+    </xd:doc>
     <xsl:function name="hcmc:createNumFilterMap" as="element(j:map)">
         <xsl:param name="metas" as="element(meta)+"/>
         <xsl:param name="filterIdPrefix" as="xs:string"/>
@@ -951,14 +1015,19 @@
         <xd:desc>Template to convert any child of an hcmc:params element to a JSON value.</xd:desc>
     </xd:doc>
     <xsl:template match="hcmc:params/hcmc:*" mode="configToArray">
-        <xsl:element namespace="http://www.w3.org/2005/xpath-functions" name="{if (text() castable as xs:integer) then 'number' else 'string'}">
+        <xsl:element namespace="http://www.w3.org/2005/xpath-functions"
+            name="{if (text() castable as xs:integer) then 'number' else 'string'}">
             <xsl:attribute name="key" select="local-name()"/>
             <xsl:apply-templates mode="#current"/>
         </xsl:element>
     </xsl:template>
     
     
-    
+    <!--**************************************************************
+       *                                                            *
+       *                     Utility functions                      *
+       *                                                            *
+       **************************************************************-->
     
     <xd:doc>
         <xd:desc><xd:ref name="hcmc:normalize-boolean">hcmc:normalize-boolean</xd:ref>
